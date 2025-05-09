@@ -1,125 +1,155 @@
+"""
+Date modified: 5/9/2025
+"""
 
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+from selenium.common.exceptions import NoSuchElementException, WebDriverException, StaleElementReferenceException
+from webdriver_manager.chrome import ChromeDriverManager
+import csv
 import os
+from datetime import datetime
+from itertools import product
 
-# Path to chromedriver
-chromedriver_path = "" # REPLACE WITH THE PATH TO YOUR DOWNLOADED CHROMEDRIVER
+# Define keyword lists
+socialmedia_words = ["social media", "facebook", "instagram", "twitter", "tiktok", "influencer", "creator"]
+gender_words = ["gender", "women", "girls", "feminism", "wife", "mom", "mother"]
+political_words = ["conservative", "alt-right", "trad wife", "religion", "traditional", "family", "marriage",
+                   "housewife", "tradwife", "tradwives", "republican", "right-wing", "domestic"]
 
-# Your Web of Science login credentials (REPLACE)
-username = ""
-password = ""
-
-# Setup WebDriver
-service = Service(chromedriver_path)
-driver = webdriver.Chrome(service=service)
-
-# Open the login page directly
-driver.get("https://access.clarivate.com/login?app=wos&locale=en-US")
-
-# Wait for the login page to load
-time.sleep(5)
-
-# Find the email input field by ID and enter your username
-email_field = driver.find_element(By.ID, 'mat-input-0')  # Using the ID for the email input field
-email_field.clear()
-email_field.send_keys(username)
-
-# Find the password input field and enter your password
-password_field = driver.find_element(By.XPATH, '//*[@id="mat-input-1"]')  # Using the ID for the password input field
-password_field.clear()
-password_field.send_keys(password)
-
-# Submit the login form
-password_field.send_keys(Keys.RETURN)
-
-# Wait for login to complete and the page to load
-time.sleep(10)  # Adjust this time depending on connection speed
-
-# After logging in, navigate to the Web of Science home page
-driver.get("https://www.webofscience.com/")
-
-# Wait for the page to load
-time.sleep(5)
-
-# Step 1: Click on "Advanced Search"
-advanced_search_link = driver.find_element(By.XPATH, '//a[@data-ta="advanced-search-link"]')
-advanced_search_link.click()
-
-# Wait for the advanced search page to load
-time.sleep(5)
-
-# Step 2: Locate the text area for search query and enter the search string
-search_textarea = driver.find_element(By.ID, "advancedSearchInputArea")
-driver.execute_script("arguments[0].scrollIntoView(true);", search_textarea)
-time.sleep(1)  # Allow time for scrolling, adjust if necessary
-search_textarea.clear()
-search_query = "((AB=(social media)) AND AB=(gender)) AND AB=(conservative)"
-search_textarea.send_keys(search_query)
+# Metadata file
+metadata_file = 'wos_metadata_log.csv'
+if not os.path.exists(metadata_file):
+    with open(metadata_file, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Keyword1', 'Keyword2', 'Keyword3', 'Timestamp', 'Result Count', 'Missed/Stale Count', 'Filename'])
 
 
-# Use JavaScript to click the button directly
-search_button = driver.find_element(By.XPATH, '/html/body/app-wos/main/div/div/div[2]/div/div/div[2]/app-input-route/app-search-home/div[2]/div[2]/app-input-route/app-search-advanced/app-advanced-search-form/form/div[3]/div[1]/div[1]/div/button[2]/span[1]')
-
-# Trigger the click event using JavaScript
-driver.execute_script("arguments[0].click();", search_button)
-
-# Wait for the search results to load
-time.sleep(5)
-
-# Scrape article details (same logic as before)
-articles = []
-while True:
-    # Parse the page content with BeautifulSoup
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-    # Wait for article links to be present (wait for the first article title link to load)
-    article_links = WebDriverWait(driver, 10).until(
-        EC.presence_of_all_elements_located((By.CLASS_NAME, 'title-link'))
-    )
+def scrape_wos_articles(keyword1, keyword2, keyword3):
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    filename = f"wos_{keyword1}_{keyword2}_{keyword3}_{timestamp}.csv".replace(" ", "_")
     
-    # Scrape each article's title and URL
-    for link in article_links:
-        article_url = link.get_attribute('href')
-        title = link.text.strip()
-        
-        # Visit article URL and get the abstract
-        driver.get("https://www.webofscience.com" + article_url)  # Use the full URL for the article page
-        time.sleep(2)
-        article_soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # Extract the abstract
-        abstract_div = article_soup.find('div', class_='abstract--instance')  # Adjusted class for abstract div
-        if abstract_div:
-            abstract = abstract_div.find('p').get_text() if abstract_div.find('p') else "Abstract not found"
-        else:
-            abstract = "Abstract not found"
-        
-        # Store the article data
-        articles.append({'title': title, 'url': "https://www.webofscience.com" + article_url, 'abstract': abstract})
-        
-    # Check if there's a next page
-    next_button = soup.find('a', class_='next')
-    if next_button:
-        next_page_url = next_button.get('href')
-        driver.get("https://www.webofscience.com" + next_page_url)  # Use the full URL for the next page
-        time.sleep(5)
-    else:
-        break
+    # Setup WebDriver
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service)
 
-# Output the articles
-for article in articles:
-    print(f"Title: {article['title']}")
-    print(f"URL: {article['url']}")
-    print(f"Abstract: {article['abstract']}")
-    print("="*80)
+    try:
+        driver.get("https://www.webofscience.com/wos/woscc/advanced-search")
+        time.sleep(10)
 
-# Close the WebDriver
-driver.quit()
+        search_textarea = driver.find_element(By.ID, "advancedSearchInputArea")
+        driver.execute_script("arguments[0].scrollIntoView(true);", search_textarea)
+        time.sleep(1)
+        search_textarea.clear()
+
+        search_query = f"((AB=({keyword1})) AND AB=({keyword2})) AND AB=({keyword3})"
+        search_textarea.send_keys(search_query)
+
+        search_button = driver.find_element(By.XPATH, '/html/body/app-wos/main/div/div/div[2]/div/div/div[2]/app-input-route/app-search-home/div[2]/div[2]/app-input-route/app-search-advanced/app-advanced-search-form/form/div[3]/div[1]/div[1]/div/button[2]/span[1]')
+        driver.execute_script("arguments[0].click();", search_button)
+
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'a[data-ta="summary-record-title-link"]'))
+        )
+
+        with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Title', 'URL', 'Authors', 'Year', 'Citations', 'Abstract']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            total_articles = 0
+            page_number = 1
+
+            stale_exceptions = 0  # Counter for stale elements
+
+            while True:
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'app-record.Summary-record-view'))
+                )
+
+                results = driver.find_elements(By.CSS_SELECTOR, 'app-record.Summary-record-view')
+                for result in results:
+                    try:
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", result)
+                        time.sleep(0.5)
+
+                        title_tag = result.find_element(By.CSS_SELECTOR, '*[data-ta="summary-record-title-link"]')
+                        title = title_tag.text.strip()
+                        url = title_tag.get_attribute('href')
+                        if url.startswith('/'):
+                            url = f"https://www.webofscience.com{url}"
+
+                        authors_elements = result.find_elements(By.CSS_SELECTOR, 'a.authors span')
+                        authors = [a.text.strip() for a in authors_elements]
+
+                        try:
+                            pub_year = result.find_element(By.CSS_SELECTOR, 'span[data-ta="summary-record-pubdate"]').text.strip()
+                        except NoSuchElementException:
+                            pub_year = "N/A"
+
+                        try:
+                            citations = result.find_element(By.CSS_SELECTOR, 'a[data-ta="stat-number-citation-related-count"]').text.strip()
+                        except NoSuchElementException:
+                            citations = "0"
+
+                        try:
+                            show_more_button = result.find_element(By.CSS_SELECTOR, 'button.show-more-text')
+                            driver.execute_script("arguments[0].click();", show_more_button)
+                            time.sleep(0.5)
+                        except NoSuchElementException:
+                            pass
+
+                        try:
+                            abstract_el = result.find_element(By.CSS_SELECTOR, 'span.abstract-size p')
+                            abstract = abstract_el.text.strip()
+                        except NoSuchElementException:
+                            abstract = "Abstract not found"
+
+                        writer.writerow({
+                            'Title': title,
+                            'URL': url,
+                            'Authors': ', '.join(authors),
+                            'Year': pub_year,
+                            'Citations': citations,
+                            'Abstract': abstract
+                        })
+
+                        total_articles += 1
+
+                    except StaleElementReferenceException:
+                        stale_exceptions += 1
+                        continue
+                    except Exception as e:
+                        print(f"Error processing an article: {e}")
+                        continue
+
+                try:
+                    next_button = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-ta="next-page-button"]'))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+                    time.sleep(1)
+                    driver.execute_script("arguments[0].click();", next_button)
+                    page_number += 1
+                except Exception:
+                    break  # No more pages
+
+        # Log metadata
+        with open(metadata_file, 'a', newline='', encoding='utf-8') as metafile:
+            writer = csv.writer(metafile)
+            writer.writerow([keyword1, keyword2, keyword3, timestamp, total_articles, stale_exceptions, filename])
+
+    except Exception as e:
+        print(f"Failed for {keyword1}, {keyword2}, {keyword3}: {e}")
+    finally:
+        driver.quit()
+
+
+# Run the script over all combinations
+for kw1, kw2, kw3 in product(socialmedia_words, gender_words, political_words):
+    print(f"\nRunning combination: {kw1}, {kw2}, {kw3}")
+    scrape_wos_articles(kw1, kw2, kw3)
